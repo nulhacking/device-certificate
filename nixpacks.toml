@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs_20", "python3"]
+
+[phases.install]
+cmds = ["npm run install:all"]
+
+[phases.build]
+cmds = ["npm run build:frontend", "npm run copy:frontend", "npm run build:backend"]
+
+[start]
+cmd = "npm start"
