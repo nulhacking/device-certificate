@@ -1,95 +1,68 @@
 # Railway Deploy
 
+**Production URL:** https://device-certificate-production.up.railway.app
+
 Bitta Railway servisi: frontend + backend birgalikda ishlaydi.
 
-## 1. GitHub ga push qiling
+## Railway Variables (tavsiya etilgan)
 
-```bash
-git init
-git add .
-git commit -m "Railway deploy"
-git remote add origin <your-repo>
-git push -u origin main
-```
-
-## 2. Railway da loyiha yarating
-
-1. [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo**
-2. Repongizni tanlang
-3. Root directory: loyiha root (`devive-certificate/`)
-
-## 3. Volume qo'shing (SQLite uchun — muhim!)
-
-Railway dashboard → servis → **Volumes** → **Add Volume**
-
-| Sozlama | Qiymat |
-|---------|--------|
-| Mount path | `/data` |
-
-Bu SQLite ma'lumotlarini redeploy da saqlab qoladi.
-
-## 4. Environment Variables
-
-Railway → servis → **Variables**:
-
-| Variable | Qiymat | Izoh |
-|----------|--------|------|
-| `JWT_SECRET` | `uzun-random-string` | **Majburiy** — o'zgartiring |
-| `NODE_ENV` | `production` | |
-| `DB_PATH` | `/data/app.db` | Volume bilan |
-| `ADMIN_PASSWORD` | `kuchli-parol` | Production da o'zgartiring |
-| `DEMO_PASSWORD` | `kuchli-parol` | Ixtiyoriy |
-
-**WebAuthn** (Railway avtomatik beradi, qo'lda ham bo'ladi):
+Railway dashboard → servis → **Variables**:
 
 | Variable | Qiymat |
 |----------|--------|
-| `RAILWAY_PUBLIC_DOMAIN` | Railway avtomatik qo'shadi |
-| `RP_ID` | `your-app.up.railway.app` (custom domain bo'lsa shu domain) |
-| `ORIGIN` | `https://your-app.up.railway.app` |
+| `NODE_ENV` | `production` |
+| `JWT_SECRET` | uzun random string |
+| `DB_PATH` | `/data/app.db` |
+| `RP_ID` | `device-certificate-production.up.railway.app` |
+| `ORIGIN` | `https://device-certificate-production.up.railway.app` |
+| `CORS_ORIGIN` | `https://device-certificate-production.up.railway.app` |
+| `ADMIN_PASSWORD` | kuchli parol |
 
-> `RAILWAY_PUBLIC_DOMAIN` o'rnatilsa `RP_ID` va `ORIGIN` avtomatik hisoblanadi.
+> Agar `ORIGIN` yoki `CORS_ORIGIN` da `localhost` qolsa, kod production da avtomatik to'g'ri domenni ishlatadi.
 
-Custom domain ishlatsangiz:
-```
-RP_ID=app.sizning-domen.uz
-ORIGIN=https://app.sizning-domen.uz
-```
+To'liq namuna: [`.env.railway.example`](./.env.railway.example)
 
-## 5. Deploy
+## Volume (SQLite — muhim!)
 
-Railway avtomatik build qiladi:
+Railway dashboard → servis → **Volumes** → mount path: `/data`
 
-```
-npm run build  → frontend + backend
-npm start      → server ishga tushadi
-```
-
-Health check: `GET /health`
-
-## 6. Birinchi kirish
+## Tekshirish
 
 Deploy tugagach:
 
-- URL: `https://your-app.up.railway.app`
-- Admin: `admin` / siz belgilagan `ADMIN_PASSWORD` (default: `admin123`)
-- Demo user: `user1` / `user123`
+```bash
+curl https://device-certificate-production.up.railway.app/health
+```
 
-**Muhim:** Production da `ADMIN_PASSWORD` ni albatta o'zgartiring!
+Kutilgan javob:
 
-## 7. Laptop bog'lash
+```json
+{
+  "status": "ok",
+  "auth": "webauthn",
+  "origin": "https://device-certificate-production.up.railway.app",
+  "rpID": "device-certificate-production.up.railway.app",
+  "production": true
+}
+```
 
-1. `https://your-app.up.railway.app` da admin bilan kiring
-2. `/enroll` sahifasida user tanlang
-3. Windows Hello bilan laptop bog'lang
+## Birinchi kirish
 
-WebAuthn HTTPS da ishlaydi — Railway buni avtomatik ta'minlaydi.
+1. https://device-certificate-production.up.railway.app/login
+2. Admin: `admin` / `ADMIN_PASSWORD`
+3. `/enroll` da laptop bog'lash (Windows Hello)
+
+## Laptop bog'lash
+
+1. Admin bilan kiring
+2. `/enroll?userId=2` oching
+3. Windows Hello / PIN bilan laptopni userga bog'lang
+4. Endi shu user faqat shu laptopdan login qila oladi
 
 ## Muammolar
 
 | Muammo | Yechim |
 |--------|--------|
-| Ma'lumotlar yo'qoladi | Volume `/data` ga ulanganini tekshiring |
-| WebAuthn ishlamaydi | `RP_ID` va `ORIGIN` domen bilan mos kelishini tekshiring |
-| Build xato | Node 20+ kerak (engines package.json da) |
+| WebAuthn ishlamaydi | `/health` da `origin` va `rpID` domen bilan mos ekanini tekshiring |
+| Ma'lumotlar yo'qoladi | Volume `/data` ulanganini tekshiring |
 | 502 error | `/health` endpoint ishlayotganini tekshiring |

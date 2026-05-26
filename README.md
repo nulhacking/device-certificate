@@ -59,11 +59,13 @@ npm run dev    # http://localhost:5173
 
 ## Production
 
-`.env` da quyidagilarni o'zgartiring:
+**Live:** https://device-certificate-production.up.railway.app
+
+WebAuthn sozlamalari:
 
 ```
-RP_ID=yourdomain.com
-ORIGIN=https://yourdomain.com
+RP_ID=device-certificate-production.up.railway.app
+ORIGIN=https://device-certificate-production.up.railway.app
 JWT_SECRET=long-random-secret
 ```
 
@@ -78,4 +80,3 @@ Qisqacha:
 2. Volume mount: `/data` (SQLite uchun)
 3. `JWT_SECRET` va `ADMIN_PASSWORD` ni o'zgartiring
 4. Deploy — bitta URL da frontend + backend ishlaydi
-# device-certificate

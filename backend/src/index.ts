@@ -10,7 +10,7 @@ import webauthnRoutes from './routes/webauthn.js';
 import { authMiddleware } from './middleware/auth.js';
 import { deviceGuard } from './middleware/deviceGuard.js';
 import { bootstrap } from './bootstrap.js';
-import { getAppOrigin, getCorsOrigin, isProduction } from './config.js';
+import { getAppOrigin, getCorsOrigin, getPublicConfig, isProduction } from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -31,8 +31,7 @@ app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     auth: 'webauthn',
-    origin: getAppOrigin(),
-    production: isProduction()
+    ...getPublicConfig()
   });
 });
 
