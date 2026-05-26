@@ -1,3 +1,5 @@
+export type DeviceApprovalStatus = 'pending' | 'approved' | 'rejected';
+
 export type UserRole = 'user' | 'admin';
 
 export interface User {
@@ -20,6 +22,7 @@ export interface DeviceCredential {
   device_type: string | null;
   registered_by: number | null;
   is_active: number;
+  approval_status: DeviceApprovalStatus;
   transports: string | null;
   created_at: string;
 }

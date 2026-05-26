@@ -8,7 +8,13 @@ import {
   updateDeviceRestricted
 } from '../db/index.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
-import { listUserDevices, removeDevice } from '../services/webauthnService.js';
+import {
+  approveDevice,
+  listPendingDevices,
+  listUserDevices,
+  rejectDevice,
+  removeDevice
+} from '../services/webauthnService.js';
 
 const router = Router();
 
@@ -24,6 +30,55 @@ router.get('/users', (_req, res) => {
   }));
 
   res.json(users);
+});
+
+router.get('/devices/pending', (_req, res) => {
+  const devices = listPendingDevices().map(d => ({
+    id: d.id,
+    userId: d.user_id,
+    username: d.username,
+    credentialId: d.credential_id,
+    deviceName: d.device_name,
+    deviceType: d.device_type,
+    approvalStatus: d.approval_status,
+    createdAt: d.created_at
+  }));
+
+  res.json(devices);
+});
+
+router.post('/devices/:id/approve', (req, res) => {
+  const deviceId = Number(req.params.id);
+
+  try {
+    const device = approveDevice(deviceId);
+    res.json({
+      id: device!.id,
+      approvalStatus: device!.approval_status,
+      message: 'Qurilma tasdiqlandi'
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === 'DEVICE_NOT_FOUND') {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Qurilma topilmadi' });
+      return;
+    }
+    throw err;
+  }
+});
+
+router.post('/devices/:id/reject', (req, res) => {
+  const deviceId = Number(req.params.id);
+
+  try {
+    rejectDevice(deviceId);
+    res.json({ success: true, message: 'Qurilma rad etildi' });
+  } catch (err) {
+    if (err instanceof Error && err.message === 'DEVICE_NOT_FOUND') {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Qurilma topilmadi' });
+      return;
+    }
+    throw err;
+  }
 });
 
 router.post('/users', (req, res) => {
@@ -108,6 +163,7 @@ router.get('/users/:id/devices', (req, res) => {
     credentialId: d.credential_id,
     deviceName: d.device_name,
     deviceType: d.device_type,
+    approvalStatus: d.approval_status,
     registeredBy: d.registered_by,
     createdAt: d.created_at
   }));

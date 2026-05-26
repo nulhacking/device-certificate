@@ -49,6 +49,11 @@ function migrateLegacySchema() {
     db.exec('DROP TABLE IF EXISTS allowed_devices');
   }
 
+  const deviceCols = db.prepare("PRAGMA table_info(device_credentials)").all() as Array<{ name: string }>;
+  if (deviceCols.length > 0 && !deviceCols.some(c => c.name === 'approval_status')) {
+    db.exec("ALTER TABLE device_credentials ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved'");
+  }
+
   const sessionCols = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
   if (sessionCols.some(c => c.name === 'device_fingerprint') && !sessionCols.some(c => c.name === 'credential_id')) {
     db.exec(`
@@ -136,16 +141,41 @@ export function updateDeviceRestricted(userId: number, deviceRestricted: boolean
   return getUserById(userId);
 }
 
-export function getUserCredentials(userId: number) {
+export function getUserCredentials(userId: number, approvalStatus: 'approved' | 'pending' | 'all' = 'all') {
+  const statusFilter =
+    approvalStatus === 'all' ? '' : ` AND approval_status = '${approvalStatus}'`;
+
   return db
     .prepare(
       `SELECT id, user_id, credential_id, public_key, counter, device_name, device_type,
-              registered_by, is_active, transports, created_at
+              registered_by, is_active, approval_status, transports, created_at
        FROM device_credentials
-       WHERE user_id = ? AND is_active = 1
+       WHERE user_id = ? AND is_active = 1${statusFilter}
        ORDER BY created_at DESC`
     )
     .all(userId) as import('../types.js').DeviceCredential[];
+}
+
+export function getAllPendingDevices() {
+  return db
+    .prepare(
+      `SELECT dc.id, dc.user_id, dc.credential_id, dc.device_name, dc.device_type,
+              dc.approval_status, dc.created_at, u.username
+       FROM device_credentials dc
+       JOIN users u ON u.id = dc.user_id
+       WHERE dc.is_active = 1 AND dc.approval_status = 'pending'
+       ORDER BY dc.created_at DESC`
+    )
+    .all() as Array<{
+      id: number;
+      user_id: number;
+      credential_id: string;
+      device_name: string;
+      device_type: string | null;
+      approval_status: string;
+      created_at: string;
+      username: string;
+    }>;
 }
 
 export function getCredentialById(credentialId: string) {
@@ -161,8 +191,15 @@ export function getCredentialDbId(id: number) {
 }
 
 export function hasActiveCredentials(userId: number) {
+  return hasApprovedCredentials(userId);
+}
+
+export function hasApprovedCredentials(userId: number) {
   const row = db
-    .prepare('SELECT id FROM device_credentials WHERE user_id = ? AND is_active = 1 LIMIT 1')
+    .prepare(
+      `SELECT id FROM device_credentials
+       WHERE user_id = ? AND is_active = 1 AND approval_status = 'approved' LIMIT 1`
+    )
     .get(userId);
   return !!row;
 }
@@ -171,10 +208,17 @@ export function isCredentialAllowed(userId: number, credentialId: string) {
   const row = db
     .prepare(
       `SELECT id FROM device_credentials
-       WHERE user_id = ? AND credential_id = ? AND is_active = 1`
+       WHERE user_id = ? AND credential_id = ? AND is_active = 1 AND approval_status = 'approved'`
     )
     .get(userId, credentialId);
   return !!row;
+}
+
+export function getCredentialApprovalStatus(credentialId: string) {
+  const row = db
+    .prepare('SELECT approval_status FROM device_credentials WHERE credential_id = ? AND is_active = 1')
+    .get(credentialId) as { approval_status: string } | undefined;
+  return row?.approval_status ?? null;
 }
 
 export function saveCredential(data: {
@@ -186,12 +230,15 @@ export function saveCredential(data: {
   deviceType: string | null;
   registeredBy: number | null;
   transports: string[];
+  approvalStatus?: import('../types.js').DeviceApprovalStatus;
 }) {
+  const approvalStatus = data.approvalStatus ?? 'pending';
+
   const result = db
     .prepare(
       `INSERT INTO device_credentials
-       (user_id, credential_id, public_key, counter, device_name, device_type, registered_by, transports)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       (user_id, credential_id, public_key, counter, device_name, device_type, registered_by, transports, approval_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       data.userId,
@@ -201,12 +248,18 @@ export function saveCredential(data: {
       data.deviceName,
       data.deviceType,
       data.registeredBy,
-      JSON.stringify(data.transports)
+      JSON.stringify(data.transports),
+      approvalStatus
     );
 
   return db
     .prepare('SELECT * FROM device_credentials WHERE id = ?')
     .get(Number(result.lastInsertRowid)) as import('../types.js').DeviceCredential;
+}
+
+export function updateCredentialApproval(id: number, approvalStatus: import('../types.js').DeviceApprovalStatus) {
+  db.prepare('UPDATE device_credentials SET approval_status = ? WHERE id = ?').run(approvalStatus, id);
+  return getCredentialDbId(id);
 }
 
 export function updateCredentialCounter(credentialId: string, counter: number) {

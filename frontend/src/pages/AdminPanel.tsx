@@ -1,17 +1,30 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError, UserInfo } from '../services/api';
+import { getBiometricLabel } from '../services/WebAuthnService';
 
 type DeviceItem = {
   id: number;
   credentialId: string;
   deviceName: string;
   deviceType: string | null;
+  approvalStatus: string;
+  createdAt: string;
+};
+
+type PendingDeviceItem = {
+  id: number;
+  userId: number;
+  username: string;
+  deviceName: string;
+  deviceType: string | null;
+  approvalStatus: string;
   createdAt: string;
 };
 
 export default function AdminPanel() {
   const [users, setUsers] = useState<UserInfo[]>([]);
+  const [pendingDevices, setPendingDevices] = useState<PendingDeviceItem[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [devices, setDevices] = useState<DeviceItem[]>([]);
   const [error, setError] = useState('');
@@ -22,12 +35,23 @@ export default function AdminPanel() {
   const [newDeviceRestricted, setNewDeviceRestricted] = useState(true);
   const [newRole, setNewRole] = useState<'user' | 'admin'>('user');
 
+  const biometricLabel = getBiometricLabel();
+
   const loadUsers = useCallback(async () => {
     try {
       const data = await api.getUsers();
       setUsers(data);
     } catch (err) {
       setError((err as ApiError).message ?? 'Userlar yuklanmadi');
+    }
+  }, []);
+
+  const loadPendingDevices = useCallback(async () => {
+    try {
+      const data = await api.getPendingDevices();
+      setPendingDevices(data);
+    } catch (err) {
+      setError((err as ApiError).message ?? 'Kutilayotgan qurilmalar yuklanmadi');
     }
   }, []);
 
@@ -42,7 +66,8 @@ export default function AdminPanel() {
 
   useEffect(() => {
     loadUsers();
-  }, [loadUsers]);
+    loadPendingDevices();
+  }, [loadUsers, loadPendingDevices]);
 
   useEffect(() => {
     if (selectedUserId) {
@@ -86,6 +111,34 @@ export default function AdminPanel() {
     }
   }
 
+  async function handleApproveDevice(deviceId: number) {
+    setError('');
+    setSuccess('');
+
+    try {
+      const result = await api.approveDevice(deviceId);
+      setSuccess(result.message);
+      await loadPendingDevices();
+      if (selectedUserId) await loadDevices(selectedUserId);
+    } catch (err) {
+      setError((err as ApiError).message ?? 'Tasdiqlash xatoligi');
+    }
+  }
+
+  async function handleRejectDevice(deviceId: number) {
+    setError('');
+    setSuccess('');
+
+    try {
+      await api.rejectDevice(deviceId);
+      setSuccess('Qurilma rad etildi');
+      await loadPendingDevices();
+      if (selectedUserId) await loadDevices(selectedUserId);
+    } catch (err) {
+      setError((err as ApiError).message ?? 'Rad etish xatoligi');
+    }
+  }
+
   async function handleRemoveDevice(deviceId: number) {
     setError('');
     setSuccess('');
@@ -94,6 +147,7 @@ export default function AdminPanel() {
       await api.removeDevice(deviceId);
       setSuccess('Laptop olib tashlandi');
       if (selectedUserId) await loadDevices(selectedUserId);
+      await loadPendingDevices();
     } catch (err) {
       setError((err as ApiError).message ?? 'O\'chirish xatoligi');
     }
@@ -107,6 +161,55 @@ export default function AdminPanel() {
 
       {error && <div className="error-box">{error}</div>}
       {success && <div className="success-box">{success}</div>}
+
+      <div className="card" style={{ marginBottom: 24 }}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>
+          Admin tasdiqlashi kutilayotgan qurilmalar ({pendingDevices.length})
+        </h2>
+        {pendingDevices.length === 0 ? (
+          <p style={{ color: '#6b7280', margin: 0 }}>Hozircha kutilayotgan qurilma yo&apos;q.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Qurilma</th>
+                <th>Turi</th>
+                <th>Sana</th>
+                <th>Amallar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingDevices.map(d => (
+                <tr key={d.id}>
+                  <td>{d.username}</td>
+                  <td>{d.deviceName}</td>
+                  <td>{d.deviceType ?? 'platform'}</td>
+                  <td>{new Date(d.createdAt).toLocaleString('uz-UZ')}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ marginRight: 8, padding: '6px 12px', fontSize: 12 }}
+                      onClick={() => handleApproveDevice(d.id)}
+                    >
+                      Tasdiqlash
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      style={{ padding: '6px 12px', fontSize: 12 }}
+                      onClick={() => handleRejectDevice(d.id)}
+                    >
+                      Rad etish
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div className="card" style={{ marginBottom: 24 }}>
         <h2 style={{ marginTop: 0, fontSize: 18 }}>Yangi foydalanuvchi</h2>
@@ -222,13 +325,13 @@ export default function AdminPanel() {
       {selectedUser && (
         <div className="card">
           <h2 style={{ marginTop: 0, fontSize: 18 }}>
-            {selectedUser.username} — bog&apos;langan laptoplar (WebAuthn)
+            {selectedUser.username} — bog&apos;langan laptoplar
           </h2>
 
           {devices.length === 0 ? (
             <p style={{ color: '#6b7280' }}>
               Hali laptop bog&apos;lanmagan.{' '}
-              <Link to={`/enroll?userId=${selectedUser.id}`}>Windows Hello bilan bog&apos;lash</Link>
+              <Link to={`/enroll?userId=${selectedUser.id}`}>{biometricLabel} bilan bog&apos;lash</Link>
             </p>
           ) : (
             <table>
@@ -236,7 +339,7 @@ export default function AdminPanel() {
                 <tr>
                   <th>Nomi</th>
                   <th>Turi</th>
-                  <th>Credential ID</th>
+                  <th>Holat</th>
                   <th>Sana</th>
                   <th></th>
                 </tr>
@@ -246,9 +349,27 @@ export default function AdminPanel() {
                   <tr key={d.id}>
                     <td>{d.deviceName}</td>
                     <td>{d.deviceType ?? 'platform'}</td>
-                    <td className="mono">{d.credentialId.slice(0, 24)}...</td>
+                    <td>
+                      {d.approvalStatus === 'approved' ? (
+                        <span className="badge badge-open">Tasdiqlangan</span>
+                      ) : d.approvalStatus === 'pending' ? (
+                        <span className="badge badge-pending">Kutilmoqda</span>
+                      ) : (
+                        <span className="badge badge-restricted">Rad etilgan</span>
+                      )}
+                    </td>
                     <td>{new Date(d.createdAt).toLocaleString('uz-UZ')}</td>
                     <td>
+                      {d.approvalStatus === 'pending' && (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ marginRight: 8, padding: '6px 12px', fontSize: 12 }}
+                          onClick={() => handleApproveDevice(d.id)}
+                        >
+                          Tasdiqlash
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-danger"

@@ -166,6 +166,11 @@ a:hover {
   color: #5b21b6;
 }
 
+.badge-pending {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

@@ -22,11 +22,19 @@ export type ApiError = {
 export type LoginResponse =
   | {
       requiresWebAuthn: false;
+      requiresDeviceRegistration?: false;
       accessToken: string;
       user: UserInfo;
     }
   | {
       requiresWebAuthn: true;
+      requiresDeviceRegistration?: false;
+      pendingToken: string;
+      user: UserInfo;
+    }
+  | {
+      requiresWebAuthn: false;
+      requiresDeviceRegistration: true;
       pendingToken: string;
       user: UserInfo;
     };
@@ -116,6 +124,26 @@ export const api = {
       body: JSON.stringify({ pendingToken, challengeId, credential })
     }),
 
+  loginRegisterOptions: (pendingToken: string, deviceName?: string) =>
+    request<{ options: PublicKeyCredentialCreationOptionsJSON; challengeId: string; pendingToken: string }>(
+      '/auth/webauthn/register/options',
+      {
+        method: 'POST',
+        body: JSON.stringify({ pendingToken, deviceName })
+      }
+    ),
+
+  loginRegisterVerify: (
+    pendingToken: string,
+    challengeId: string,
+    credential: unknown,
+    deviceName?: string
+  ) =>
+    request<{ status: string; message: string }>('/auth/webauthn/register/verify', {
+      method: 'POST',
+      body: JSON.stringify({ pendingToken, challengeId, credential, deviceName })
+    }),
+
   me: () => request<UserInfo>('/auth/me', { auth: true }),
 
   dashboard: () => request<{ message: string }>('/dashboard', { auth: true }),
@@ -145,6 +173,31 @@ export const api = {
       }
     ),
 
+  getPendingDevices: () =>
+    request<
+      Array<{
+        id: number;
+        userId: number;
+        username: string;
+        deviceName: string;
+        deviceType: string | null;
+        approvalStatus: string;
+        createdAt: string;
+      }>
+    >('/admin/devices/pending', { auth: true }),
+
+  approveDevice: (deviceId: number) =>
+    request<{ id: number; approvalStatus: string; message: string }>(`/admin/devices/${deviceId}/approve`, {
+      method: 'POST',
+      auth: true
+    }),
+
+  rejectDevice: (deviceId: number) =>
+    request<{ success: boolean; message: string }>(`/admin/devices/${deviceId}/reject`, {
+      method: 'POST',
+      auth: true
+    }),
+
   getUsers: () => request<Array<UserInfo & { created_at?: string }>>('/admin/users', { auth: true }),
 
   createUser: (payload: {
@@ -173,6 +226,7 @@ export const api = {
         credentialId: string;
         deviceName: string;
         deviceType: string | null;
+        approvalStatus: string;
         createdAt: string;
       }>
     >(`/admin/users/${userId}/devices`, { auth: true }),

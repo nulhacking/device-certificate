@@ -6,20 +6,24 @@ import {
   verifyRegistrationResponse
 } from '@simplewebauthn/server';
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
+import type { DeviceApprovalStatus } from '../types.js';
 import {
   cleanupExpiredChallenges,
   deactivateCredential,
   deleteChallenge,
   ensureWebAuthnUserId,
+  getAllPendingDevices,
   getChallenge,
+  getCredentialApprovalStatus,
   getCredentialById,
   getCredentialDbId,
   getUserById,
   getUserCredentials,
-  hasActiveCredentials,
+  hasApprovedCredentials,
   isCredentialAllowed,
   saveChallenge,
   saveCredential,
+  updateCredentialApproval,
   updateCredentialCounter
 } from '../db/index.js';
 
@@ -53,6 +57,11 @@ export function validateDeviceAccess(userId: number, credentialId: string | null
     return { allowed: false, code: 'CREDENTIAL_REQUIRED' as const, user };
   }
 
+  const status = getCredentialApprovalStatus(credentialId);
+  if (status === 'pending') {
+    return { allowed: false, code: 'DEVICE_PENDING_APPROVAL' as const, user };
+  }
+
   if (!isCredentialAllowed(userId, credentialId)) {
     return { allowed: false, code: 'DEVICE_NOT_ALLOWED' as const, user };
   }
@@ -61,7 +70,29 @@ export function validateDeviceAccess(userId: number, credentialId: string | null
 }
 
 export function listUserDevices(userId: number) {
-  return getUserCredentials(userId);
+  return getUserCredentials(userId, 'all');
+}
+
+export function listPendingDevices() {
+  return getAllPendingDevices();
+}
+
+export function approveDevice(deviceDbId: number) {
+  const device = getCredentialDbId(deviceDbId);
+  if (!device) {
+    throw new Error('DEVICE_NOT_FOUND');
+  }
+  return updateCredentialApproval(deviceDbId, 'approved');
+}
+
+export function rejectDevice(deviceDbId: number) {
+  const device = getCredentialDbId(deviceDbId);
+  if (!device) {
+    throw new Error('DEVICE_NOT_FOUND');
+  }
+  deactivateCredential(deviceDbId);
+  updateCredentialApproval(deviceDbId, 'rejected');
+  return device;
 }
 
 export function removeDevice(deviceDbId: number) {
@@ -75,7 +106,7 @@ export function removeDevice(deviceDbId: number) {
   return device;
 }
 
-export async function createRegistrationOptions(userId: number, deviceName: string) {
+async function buildRegistrationOptions(userId: number, deviceName: string) {
   cleanupExpiredChallenges();
 
   const user = getUserById(userId);
@@ -88,8 +119,7 @@ export async function createRegistrationOptions(userId: number, deviceName: stri
     throw new Error('WEBAUTHN_USER_ID_FAILED');
   }
 
-  const existing = getUserCredentials(userId);
-
+  const existing = getUserCredentials(userId, 'all');
   const { rpName, rpID } = getWebAuthnConfig();
 
   const options = await generateRegistrationOptions({
@@ -121,12 +151,17 @@ export async function createRegistrationOptions(userId: number, deviceName: stri
   return { options, challengeId };
 }
 
+export async function createRegistrationOptions(userId: number, deviceName: string) {
+  return buildRegistrationOptions(userId, deviceName);
+}
+
 export async function verifyRegistration(
   userId: number,
   challengeId: string,
   response: unknown,
   registeredBy: number | null,
-  deviceName: string
+  deviceName: string,
+  approvalStatus: DeviceApprovalStatus = 'pending'
 ) {
   const stored = getChallenge(challengeId);
 
@@ -164,7 +199,8 @@ export async function verifyRegistration(
     deviceName: deviceName || stored.device_name || 'Laptop',
     deviceType: credentialDeviceType,
     registeredBy,
-    transports: credential.transports ?? []
+    transports: credential.transports ?? [],
+    approvalStatus
   });
 }
 
@@ -176,9 +212,9 @@ export async function createAuthenticationOptions(userId: number) {
     throw new Error('USER_NOT_FOUND');
   }
 
-  const credentials = getUserCredentials(userId);
+  const credentials = getUserCredentials(userId, 'approved');
   if (credentials.length === 0) {
-    throw new Error('NO_CREDENTIALS');
+    throw new Error('NO_APPROVED_CREDENTIALS');
   }
 
   const { rpID } = getWebAuthnConfig();
@@ -228,6 +264,14 @@ export async function verifyAuthentication(userId: number, challengeId: string, 
     throw new Error('CREDENTIAL_NOT_ALLOWED');
   }
 
+  if (credential.approval_status === 'pending') {
+    throw new Error('DEVICE_PENDING_APPROVAL');
+  }
+
+  if (credential.approval_status !== 'approved') {
+    throw new Error('CREDENTIAL_NOT_ALLOWED');
+  }
+
   const { rpID, origin } = getWebAuthnConfig();
 
   const verification = await verifyAuthenticationResponse({
@@ -254,4 +298,4 @@ export async function verifyAuthentication(userId: number, challengeId: string, 
   return credential;
 }
 
-export { hasActiveCredentials };
+export { hasApprovedCredentials };

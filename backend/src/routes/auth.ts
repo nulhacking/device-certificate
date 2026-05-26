@@ -6,9 +6,11 @@ import { signToken, signPendingLogin, verifyPendingLogin, authMiddleware } from 
 import { deviceGuard } from '../middleware/deviceGuard.js';
 import {
   createAuthenticationOptions,
-  hasActiveCredentials,
+  createRegistrationOptions,
+  hasApprovedCredentials,
   validateDeviceAccess,
-  verifyAuthentication
+  verifyAuthentication,
+  verifyRegistration
 } from '../services/webauthnService.js';
 
 const router = Router();
@@ -35,22 +37,17 @@ router.post('/login', loginLimiter, (req, res) => {
   }
 
   if (user.device_restricted) {
-    if (!hasActiveCredentials(user.id)) {
-      res.status(403).json({
-        error: 'DEVICE_NOT_REGISTERED',
-        message: "Laptop hali bog'lanmagan. Administrator bilan bog'laning."
-      });
-      return;
-    }
-
     const pendingToken = signPendingLogin({
       userId: user.id,
       username: user.username,
       role: user.role
     });
 
+    const hasApproved = hasApprovedCredentials(user.id);
+
     res.json({
-      requiresWebAuthn: true,
+      requiresWebAuthn: hasApproved,
+      requiresDeviceRegistration: !hasApproved,
       pendingToken,
       user: {
         id: user.id,
@@ -73,6 +70,7 @@ router.post('/login', loginLimiter, (req, res) => {
 
   res.json({
     requiresWebAuthn: false,
+    requiresDeviceRegistration: false,
     accessToken: token,
     user: {
       id: user.id,
@@ -97,9 +95,79 @@ router.post('/webauthn/options', loginLimiter, async (req, res) => {
 
     res.json({ options, challengeId, pendingToken });
   } catch (err) {
-    res.status(401).json({
+    const message = err instanceof Error ? err.message : 'Token yaroqsiz';
+    res.status(err instanceof Error && err.message === 'NO_APPROVED_CREDENTIALS' ? 403 : 401).json({
       error: 'INVALID_PENDING_TOKEN',
-      message: err instanceof Error ? err.message : 'Token yaroqsiz'
+      message
+    });
+  }
+});
+
+router.post('/webauthn/register/options', loginLimiter, async (req, res) => {
+  const { pendingToken, deviceName } = req.body as { pendingToken?: string; deviceName?: string };
+
+  if (!pendingToken) {
+    res.status(400).json({ error: 'VALIDATION', message: 'pendingToken talab qilinadi' });
+    return;
+  }
+
+  try {
+    const pending = verifyPendingLogin(pendingToken);
+    const { options, challengeId } = await createRegistrationOptions(
+      pending.userId,
+      deviceName?.trim() || 'Laptop'
+    );
+
+    res.json({ options, challengeId, pendingToken });
+  } catch (err) {
+    res.status(400).json({
+      error: 'WEBAUTHN_OPTIONS_FAILED',
+      message: err instanceof Error ? err.message : 'Registration options yaratib bolmadi'
+    });
+  }
+});
+
+router.post('/webauthn/register/verify', loginLimiter, async (req, res) => {
+  const { pendingToken, challengeId, credential, deviceName } = req.body as {
+    pendingToken?: string;
+    challengeId?: string;
+    credential?: unknown;
+    deviceName?: string;
+  };
+
+  if (!pendingToken || !challengeId || !credential) {
+    res.status(400).json({
+      error: 'VALIDATION',
+      message: 'pendingToken, challengeId va credential talab qilinadi'
+    });
+    return;
+  }
+
+  try {
+    const pending = verifyPendingLogin(pendingToken);
+    const saved = await verifyRegistration(
+      pending.userId,
+      challengeId,
+      credential,
+      null,
+      deviceName?.trim() || 'Laptop',
+      'pending'
+    );
+
+    res.status(201).json({
+      status: 'pending',
+      message: "Qurilma ro'yxatdan o'tdi. Administrator tasdiqlashini kuting.",
+      device: {
+        id: saved.id,
+        deviceName: saved.device_name,
+        deviceType: saved.device_type,
+        approvalStatus: saved.approval_status
+      }
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: 'WEBAUTHN_VERIFY_FAILED',
+      message: err instanceof Error ? err.message : 'Qurilma ro\'yxatdan o\'tmadi'
     });
   }
 });
@@ -122,9 +190,14 @@ router.post('/webauthn/verify', loginLimiter, async (req, res) => {
 
     const access = validateDeviceAccess(pending.userId, verifiedCredential.credential_id);
     if (!access.allowed) {
-      res.status(403).json({
-        error: 'DEVICE_NOT_ALLOWED',
-        message: "Siz faqat ruxsat etilgan laptopdan kirishingiz mumkin."
+      const messages: Record<string, string> = {
+        DEVICE_NOT_ALLOWED: "Siz faqat ruxsat etilgan laptopdan kirishingiz mumkin.",
+        DEVICE_PENDING_APPROVAL: "Bu qurilma admin tasdiqlashini kutmoqda."
+      };
+
+      res.status(access.code === 'DEVICE_PENDING_APPROVAL' ? 403 : 403).json({
+        error: access.code,
+        message: messages[access.code!] ?? 'Qurilma ruxsati rad etildi'
       });
       return;
     }
@@ -149,7 +222,14 @@ router.post('/webauthn/verify', loginLimiter, async (req, res) => {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'WebAuthn tekshiruvi muvaffaqiyatsiz';
-    res.status(400).json({ error: 'WEBAUTHN_FAILED', message });
+    const code = message === 'DEVICE_PENDING_APPROVAL' ? 'DEVICE_PENDING_APPROVAL' : 'WEBAUTHN_FAILED';
+    res.status(403).json({
+      error: code,
+      message:
+        code === 'DEVICE_PENDING_APPROVAL'
+          ? 'Bu qurilma admin tasdiqlashini kutmoqda.'
+          : message
+    });
   }
 });
 

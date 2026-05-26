@@ -1,15 +1,24 @@
 import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { api, ApiError, isAuthenticated, saveSession } from '../services/api';
-import { authenticateDeviceCredential, isWebAuthnSupported } from '../services/WebAuthnService';
+import {
+  authenticateDeviceCredential,
+  getBiometricDescription,
+  getBiometricLabel,
+  isWebAuthnSupported,
+  registerDeviceCredential
+} from '../services/WebAuthnService';
 
 export default function Login() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [webauthnStep, setWebauthnStep] = useState(false);
+  const [registerNewDevice, setRegisterNewDevice] = useState(false);
+  const biometricLabel = getBiometricLabel();
 
   if (isAuthenticated()) {
     return <Navigate to="/dashboard" replace />;
@@ -18,34 +27,50 @@ export default function Login() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setLoading(true);
 
     try {
       const result = await api.login(username.trim(), password);
 
-      if (!result.requiresWebAuthn) {
+      if (!result.requiresWebAuthn && !result.requiresDeviceRegistration) {
         saveSession(result.accessToken, result.user);
         navigate(result.user.role === 'admin' ? '/admin' : '/dashboard');
         return;
       }
 
       if (!isWebAuthnSupported()) {
-        setError('Bu brauzer WebAuthn (Windows Hello) ni qo\'llab-quvvatlamaydi');
+        setError(`Bu brauzer WebAuthn (${biometricLabel}) ni qo'llab-quvvatlamaydi`);
         return;
       }
 
       setWebauthnStep(true);
 
-      const { options, challengeId, pendingToken } = await api.webauthnOptions(result.pendingToken);
-      const credential = await authenticateDeviceCredential(options);
-      const verified = await api.webauthnVerify(pendingToken, challengeId, credential);
+      if (result.requiresDeviceRegistration || (result.requiresWebAuthn && registerNewDevice)) {
+        const { options, challengeId, pendingToken } = await api.loginRegisterOptions(
+          result.pendingToken,
+          'Laptop'
+        );
+        const credential = await registerDeviceCredential(options);
+        const registered = await api.loginRegisterVerify(pendingToken, challengeId, credential, 'Laptop');
+        setSuccess(registered.message);
+        return;
+      }
 
-      saveSession(verified.accessToken, verified.user);
-      navigate(verified.user.role === 'admin' ? '/admin' : '/dashboard');
+      if (result.requiresWebAuthn) {
+        const { options, challengeId, pendingToken } = await api.webauthnOptions(result.pendingToken);
+        const credential = await authenticateDeviceCredential(options);
+        const verified = await api.webauthnVerify(pendingToken, challengeId, credential);
+
+        saveSession(verified.accessToken, verified.user);
+        navigate(verified.user.role === 'admin' ? '/admin' : '/dashboard');
+      }
     } catch (err) {
       const apiErr = err as ApiError & { status?: number; name?: string };
       if (apiErr.name === 'NotAllowedError') {
-        setError('Windows Hello / PIN tasdiqlanmadi yoki bekor qilindi');
+        setError(`${biometricLabel} tasdiqlanmadi yoki bekor qilindi`);
+      } else if (apiErr.error === 'DEVICE_PENDING_APPROVAL') {
+        setSuccess(apiErr.message);
       } else {
         setError(apiErr.message ?? 'Login xatoligi yuz berdi');
       }
@@ -61,10 +86,13 @@ export default function Login() {
         <h1>Tizimga kirish</h1>
         <p>
           Login va parol bilan kiring. Cheklangan foydalanuvchilar qo&apos;shimcha ravishda{' '}
-          <strong>Windows Hello / PIN</strong> orqali laptopni tasdiqlaydi.
+          <strong>{biometricLabel}</strong> orqali laptopni tasdiqlaydi. Yangi qurilma admin
+          tasdiqlashini kutadi.
         </p>
+        <p style={{ fontSize: 13, color: '#6b7280' }}>{getBiometricDescription()}</p>
 
         {error && <div className="error-box">{error}</div>}
+        {success && <div className="success-box">{success}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -90,18 +118,26 @@ export default function Login() {
               disabled={loading}
             />
           </div>
+          <div className="form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={registerNewDevice}
+                onChange={e => setRegisterNewDevice(e.target.checked)}
+                style={{ marginRight: 8 }}
+                disabled={loading}
+              />
+              Bu yangi laptop (admin tasdiqlashi kerak)
+            </label>
+          </div>
           <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
             {loading
               ? webauthnStep
-                ? 'Windows Hello kutilmoqda...'
+                ? `${biometricLabel} kutilmoqda...`
                 : 'Kutilmoqda...'
               : 'Kirish'}
           </button>
         </form>
-
-        <p style={{ marginTop: 24, fontSize: 13, color: '#9ca3af' }}>
-          Demo: admin / admin123 yoki user1 / user123 (laptop bog&apos;langan bo&apos;lishi kerak)
-        </p>
       </div>
     </div>
   );

@@ -1,7 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../services/api';
-import { isWebAuthnSupported, registerDeviceCredential } from '../services/WebAuthnService';
+import {
+  getBiometricDescription,
+  getBiometricLabel,
+  isWebAuthnSupported,
+  registerDeviceCredential
+} from '../services/WebAuthnService';
 
 export default function DeviceEnroll() {
   const [searchParams] = useSearchParams();
@@ -11,6 +16,7 @@ export default function DeviceEnroll() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const biometricLabel = getBiometricLabel();
 
   useEffect(() => {
     api.getUsers().then(setUsers).catch(() => setError('Userlar yuklanmadi'));
@@ -22,7 +28,7 @@ export default function DeviceEnroll() {
     setMessage('');
 
     if (!isWebAuthnSupported()) {
-      setError('Bu brauzer WebAuthn (Windows Hello) ni qo\'llab-quvvatlamaydi');
+      setError(`Bu brauzer WebAuthn (${biometricLabel}) ni qo'llab-quvvatlamaydi`);
       return;
     }
 
@@ -34,12 +40,12 @@ export default function DeviceEnroll() {
       const result = await api.registerVerify(Number(userId), challengeId, credential, deviceName.trim());
 
       setMessage(
-        `Laptop muvaffaqiyatli bog'landi: ${result.deviceName} (${result.deviceType ?? 'platform'}) — credential nusxalanmaydi`
+        `Laptop muvaffaqiyatli bog'landi: ${result.deviceName} (${result.deviceType ?? 'platform'}) — admin tasdiqlashisiz darhol ishlaydi`
       );
     } catch (err) {
       const apiErr = err as ApiError & { name?: string };
       if (apiErr.name === 'NotAllowedError') {
-        setError('Windows Hello / PIN tasdiqlanmadi yoki bekor qilindi');
+        setError(`${biometricLabel} tasdiqlanmadi yoki bekor qilindi`);
       } else {
         setError(apiErr.message ?? 'Bog\'lash xatoligi');
       }
@@ -52,13 +58,14 @@ export default function DeviceEnroll() {
     <div className="card">
       <h1 style={{ marginTop: 0 }}>Laptop bog&apos;lash (WebAuthn)</h1>
       <p style={{ color: '#6b7280', fontSize: 14 }}>
-        Admin berilgan laptopda ushbu sahifani ochadi. Windows Hello / PIN orqali qurilma kaliti TPM
-        chipda yaratiladi — bu kalit nusxalanmaydi va faqat shu laptopda ishlaydi.
+        Admin berilgan laptopda ushbu sahifani ochadi. {biometricLabel} orqali qurilma kaliti
+        yaratiladi — Mac da Touch ID, Windows da Windows Hello.
       </p>
+      <p style={{ fontSize: 13, color: '#6b7280' }}>{getBiometricDescription()}</p>
 
       <div className="success-box" style={{ marginBottom: 24 }}>
-        <strong>Xavfsizlik:</strong> WebAuthn/FIDO2 — private key faqat shu laptopning TPM/Secure
-        Enclave da saqlanadi. Boshqa kompyuterga ko&apos;chirib bo&apos;lmaydi.
+        <strong>Admin bog&apos;lash:</strong> bu usul qurilmani darhol tasdiqlangan holatda qo&apos;shadi.
+        User o&apos;zi login qilganda esa admin tasdiqlashi kerak bo&apos;ladi.
       </div>
 
       {error && <div className="error-box">{error}</div>}
@@ -82,13 +89,13 @@ export default function DeviceEnroll() {
             id="deviceName"
             value={deviceName}
             onChange={e => setDeviceName(e.target.value)}
-            placeholder="Masalan: Ofis Dell #3"
+            placeholder="Masalan: Ofis MacBook #3"
             required
             disabled={loading}
           />
         </div>
         <button type="submit" className="btn btn-primary" disabled={loading || !userId}>
-          {loading ? 'Windows Hello kutilmoqda...' : 'Windows Hello bilan bog\'lash'}
+          {loading ? `${biometricLabel} kutilmoqda...` : `${biometricLabel} bilan bog'lash`}
         </button>
       </form>
     </div>

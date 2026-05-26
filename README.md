@@ -33,10 +33,12 @@ npm run dev    # http://localhost:5173
 ## Workflow
 
 1. Admin `/admin` da foydalanuvchi yaratadi (`deviceRestricted = true`)
-2. Admin berilgan laptopda `/enroll?userId=2` ochadi
-3. **Windows Hello / PIN** bilan laptop kaliti ro'yxatdan o'tkaziladi
-4. User login qilganda: parol + Windows Hello tasdiqlashi talab qilinadi
-5. Boshqa kompyuterdan kirish mumkin emas — private key shu laptopda
+2. **User birinchi login:** parol + Touch ID / Windows Hello → qurilma **pending** holatda qo'shiladi
+3. **Admin tasdiqlaydi:** `/admin` → "Admin tasdiqlashi kutilayotgan qurilmalar" → Tasdiqlash
+4. User qayta login qiladi → Touch ID / Windows Hello → kirish
+5. **Mac:** Touch ID, **Windows:** Windows Hello (WebAuthn platform)
+
+Admin to'g'ridan `/enroll` orqali bog'lagan qurilmalar darhol tasdiqlangan bo'ladi.
 
 ## Nima uchun fingerprint emas?
 

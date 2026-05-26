@@ -59,7 +59,8 @@ router.post('/register/verify', authMiddleware, adminMiddleware, async (req, res
       challengeId,
       credential,
       req.user!.userId,
-      deviceName?.trim() || 'Laptop'
+      deviceName?.trim() || 'Laptop',
+      'approved'
     );
 
     res.status(201).json({

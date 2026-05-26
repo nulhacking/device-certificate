@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS device_credentials (
   device_type TEXT,
   registered_by INTEGER,
   is_active INTEGER NOT NULL DEFAULT 1,
+  approval_status TEXT NOT NULL DEFAULT 'pending' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
   transports TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
